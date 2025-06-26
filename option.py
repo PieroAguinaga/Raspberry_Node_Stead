@@ -30,6 +30,15 @@ def parse_args():
     parser.add_argument('--save_name', type=str, default='inferencia', help='Nombre base del archivo de video de salida (sin .mp4)')
     parser.add_argument('--visualize', action='store_true', help='Mostrar visualizacin en tiempo real durante inferencia')
     parser.add_argument('--model_name_suffix', type=str, required=False, help='Nombre del modelo personalizado (ej: 888tiny)')
+
+
+    parser.add_argument('--video', type=int, required=False, help='ID del video de demo (ej: 1 = video_1.mp4)')
+    parser.add_argument('--x3d_version', type=str, default='x3d_xs', help='Versión del modelo X3D (ej. x3d_xs, x3d_m)')
+    parser.add_argument('--num_frames', type=int, default=16, help='Cantidad de frames por clip')
+    parser.add_argument('--stride', type=int, default=2, help='Stride entre frames')
+    parser.add_argument('--arch', type=str, choices=["base", "fast", "tiny"], default="base", help="Arquitectura del modelo custom")
+    parser.add_argument('--camera_id', type=int, default=1, help='ID de la cámara simulada')
+    parser.add_argument('--endpoint', type=str, default='http://localhost:8080/anomaly', help='Endpoint para enviar resultados')
     args = parser.parse_args()
     return args
 

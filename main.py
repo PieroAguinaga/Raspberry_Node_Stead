@@ -8,69 +8,103 @@ import requests
 import json
 from datetime import datetime
 from simluacion import start_camera
-import argparse
+from buffer import FrameBuffer
+from option import parse_args
+import cv2
+import threading
+
+def enviar_score(payload, endpoint):
+    try:
+        print(f"📤 [Async] Enviando datos al endpoint: {endpoint}")
+        r = requests.post(endpoint, json=payload, headers={"Content-Type": "application/json"})
+        print(f"✅ [Async] Respuesta del servidor: Código {r.status_code}")
+    except Exception as e:
+        print(f"❌ [Async] Error al enviar: {e}")
 
 def main(args):
-    # Iniciar simulación de cámara IP con video de prueba
+    print("🚀 Iniciando sistema de detección de anomalías...")
+
+    # 🟡 Lanzar simulación de cámara
+    print(f"🟡 Lanzando simulación de cámara con video ID = {args.video}")
     start_camera(args.video)
 
-    # Dirección de la cámara IP (stream de Flask)
     ip_cam = "http://localhost:5000/loop"
+    print(f"🌐 Dirección del stream: {ip_cam}")
 
-    # Cargar modelos
+    # 🔄 FrameBuffer
+    buffer_size = args.num_frames * args.stride * 2
+    fb = FrameBuffer(ip_cam, maxlen=buffer_size).start()
+    print("✅ FrameBuffer iniciado correctamente.")
+    time.sleep(5)
+
+    # 🧠 Cargar modelos
     device = torch.device("cpu")
-    model_x3d, transform, transform_params = load_x3d(args.x3d_version, device, args.num_frames, args.stride)
+    model_x3d, transform, params = load_x3d(args.x3d_version, device, args.num_frames, args.stride)
     model_custom = load_custom_model(args.model_name, args.arch, device)
 
-    clip_frame_count = args.num_frames * args.stride
-    size = (transform_params["side_size"], transform_params["side_size"])
+    size = (params["side_size"], params["side_size"])
+    print(f"📏 Tamaño de redimensionamiento: {size}")
 
-    while True:
-        # Leer frames desde la IP cam simulada
-        clip_tensor = read_frames(ip_cam, args.num_frames, args.stride, size)
-        clip_dict = {"video": clip_tensor}
-        transformed_clip = transform(clip_dict)["video"]  # (T, C, H, W)
+    # 🕒 Calcular tiempo mínimo entre inferencias
+    fps = 30  # puedes parametrizarlo si tu cámara no es 30fps
+    intervalo_seg = (args.num_frames * args.stride) / fps
+    print(f"⏲️ Ventana de inferencia cada {intervalo_seg:.2f} segundos")
 
-        with torch.no_grad():
-            features = model_x3d(transformed_clip.unsqueeze(0).to(device)).cpu().numpy().squeeze()
+    try:
+        while True:
+            T1 = time.time()
+            date = datetime.now().isoformat()
 
-        vector = torch.from_numpy(np.expand_dims(features, axis=0)).to(device)
+            print("\n📸 Obteniendo frames del buffer...")
+            raw_frames = fb.read_recent(args.num_frames, args.stride)
+            print(f"🟢 {len(raw_frames)} frames obtenidos.")
 
-        with torch.no_grad():
-            score, _ = model_custom(vector)
-            score = torch.sigmoid(score).squeeze().item()
+            if len(raw_frames) < args.num_frames:
+                print("⚠️ Insuficientes frames, esperando...")
+                time.sleep(1)
+                continue
 
-        # Enviar resultado al servidor
-        try:
-            payload = {
-                "date": datetime.now().isoformat(),
-                "camera_id": args.camera_id,
-                "score": score
-            }
+            # Preprocesar
+            proc = []
+            for fr in raw_frames:
+                fr = cv2.resize(fr, size)
+                fr = cv2.cvtColor(fr, cv2.COLOR_BGR2RGB)
+                t = torch.from_numpy(fr).permute(2, 0, 1).float() / 255.0
+                proc.append(t)
+            clip_tensor = torch.stack(proc)
 
-            headers = {
-                "Content-Type": "application/json"
-            }
+            # Transform + X3D
+            transformed = transform({"video": clip_tensor.float()})["video"]
+            with torch.no_grad():
+                feat = model_x3d(transformed.unsqueeze(0).to(device)).cpu().numpy()
+            vector = torch.from_numpy(feat).to(device)
 
-            response = requests.post(args.endpoint, data=json.dumps(payload), headers=headers)
-            print(f"✅ Score enviado: {payload} → Código {response.status_code}")
-        except Exception as e:
-            print(f"❌ Error al enviar: {e}")
-            continue
+            # Custom inference
+            with torch.no_grad():
+                score, _ = model_custom(vector)
+                score = torch.sigmoid(score).item()
+
+            print(f"🔍 SCORE DE ANOMALÍA: {round(score, 4)}")
+
+            # Envío
+            payload = {"date": date, "camera_id": args.camera_id, "score": score}
+            threading.Thread(target=enviar_score, args=(payload, args.endpoint), daemon=True).start()
+
+            # ⏱ Esperar hasta que se cumpla el tiempo de ventana
+            elapsed = time.time() - T1
+            restante = intervalo_seg - elapsed
+            if restante > 0:
+                print(f"😴 Durmiendo {round(restante, 2)} s para sincronizar...")
+                time.sleep(restante)
+            else:
+                print(f"⚠️ Procesamiento tardó más de lo estimado: {round(elapsed,2)} s")
+
+    except KeyboardInterrupt:
+        print("✋ Interrupción detectada. Finalizando...")
+    finally:
+        fb.stop()
+        print("🛑 FrameBuffer detenido correctamente.")
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
-
-    parser.add_argument("--video", type=int, required=True, help="ID del video de demo (ej. 1 = video_1.mp4)")
-    parser.add_argument("--x3d_version", type=str, default="x3d_xs", help="Versión del modelo X3D (ej. x3d_xs, x3d_m)")
-    parser.add_argument("--num_frames", type=int, default=16, help="Cantidad de frames por clip")
-    parser.add_argument("--stride", type=int, default=2, help="Stride entre frames")
-    parser.add_argument("--model_name", type=str, required=True, help="Nombre del modelo custom sin .pkl")
-    parser.add_argument("--arch", type=str, choices=["base", "fast", "tiny"], default="base", help="Arquitectura del modelo custom")
-    parser.add_argument("--camera_id", type=int, default=1, help="ID de la cámara simulada")
-    parser.add_argument("--endpoint", type=str, default="http://localhost:8080/anomaly", help="Endpoint para enviar resultados")
-
-    args = parser.parse_args()
+    args = parse_args()
     main(args)
-
-    #python main.py --video 1 x3d_version xs num_frames 13 --stride 6 --model_name STEAD_FAST_S_13_6final --arch fast --camera_id 1 --endpoint http://localhost:8080/anomaly

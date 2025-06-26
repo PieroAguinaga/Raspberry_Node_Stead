@@ -52,14 +52,11 @@ def load_x3d(x3d_version: str, device, num_frames, stride):
     transform = ApplyTransformToKey(
         key="video",
         transform=Compose([
-            Permute((3, 0, 1, 2)),
-            UniformTemporalSubsample(transform_params["num_frames"]),
-            Lambda(lambda x: x / 255.0),
-            Permute((1, 0, 2, 3)),
-            Normalize(mean, std),
-            ShortSideScale(size=transform_params["side_size"]),
-            CenterCrop((transform_params["crop_size"], transform_params["crop_size"])),
-            Permute((1, 0, 2, 3))
+        Lambda(lambda x: x / 255.0),  # Normalizar a [0,1]
+        Normalize([0.45, 0.45, 0.45], [0.225, 0.225, 0.225]),  # Promedio RGB
+        ShortSideScale(size=transform_params["side_size"]),
+        CenterCrop((transform_params["crop_size"], transform_params["crop_size"])),
+        Permute((1, 0, 2, 3))
         ])
     )
 
