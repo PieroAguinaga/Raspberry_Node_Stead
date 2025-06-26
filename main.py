@@ -2,13 +2,12 @@ import torch
 from load_custom_model import load_custom_model
 from load_x3d import load_x3d
 import numpy as np
-from capture_frames import read_frames
-import time 
+import time
 import requests
 import json
 from datetime import datetime
 from simluacion import start_camera
-from buffer import FrameBuffer
+from buffer import FrameBuffer  # Usa la nueva versión con read_next_window
 from option import parse_args
 import cv2
 import threading
@@ -24,29 +23,25 @@ def enviar_score(payload, endpoint):
 def main(args):
     print("🚀 Iniciando sistema de detección de anomalías...")
 
-    # 🟡 Lanzar simulación de cámara
     print(f"🟡 Lanzando simulación de cámara con video ID = {args.video}")
     start_camera(args.video)
-
+    window_id = 0 
     ip_cam = "http://localhost:5000/loop"
     print(f"🌐 Dirección del stream: {ip_cam}")
 
-    # 🔄 FrameBuffer
-    buffer_size = args.num_frames * args.stride * 2
+    # Inicializar FrameBuffer con nuevo modo sliding window
+    buffer_size = args.num_frames * args.stride * 4
     fb = FrameBuffer(ip_cam, maxlen=buffer_size).start()
-    print("✅ FrameBuffer iniciado correctamente.")
+    print(f"✅ FrameBuffer iniciado con tamaño máximo = {buffer_size}")
     time.sleep(5)
 
-    # 🧠 Cargar modelos
+    # Cargar modelos
     device = torch.device("cpu")
     model_x3d, transform, params = load_x3d(args.x3d_version, device, args.num_frames, args.stride)
     model_custom = load_custom_model(args.model_name, args.arch, device)
-
     size = (params["side_size"], params["side_size"])
-    print(f"📏 Tamaño de redimensionamiento: {size}")
 
-    # 🕒 Calcular tiempo mínimo entre inferencias
-    fps = 30  # puedes parametrizarlo si tu cámara no es 30fps
+    fps = 30  # Puedes hacerlo variable si tu cámara no es 30 FPS
     intervalo_seg = (args.num_frames * args.stride) / fps
     print(f"⏲️ Ventana de inferencia cada {intervalo_seg:.2f} segundos")
 
@@ -55,14 +50,17 @@ def main(args):
             T1 = time.time()
             date = datetime.now().isoformat()
 
-            print("\n📸 Obteniendo frames del buffer...")
-            raw_frames = fb.read_recent(args.num_frames, args.stride)
-            print(f"🟢 {len(raw_frames)} frames obtenidos.")
 
-            if len(raw_frames) < args.num_frames:
-                print("⚠️ Insuficientes frames, esperando...")
-                time.sleep(1)
+            print("\n📸 Leyendo ventana siguiente del buffer (sliding window)...")
+            #Pooling pasivo
+            try:
+                raw_frames = fb.read_next_window(args.num_frames, args.stride)
+            except RuntimeError as e:
+                print(f"⏳ Esperando frames: {e}")
+                time.sleep(0.1)
                 continue
+
+            print(f"🟢 {len(raw_frames)} frames obtenidos.")
 
             # Preprocesar
             proc = []
@@ -73,31 +71,32 @@ def main(args):
                 proc.append(t)
             clip_tensor = torch.stack(proc)
 
-            # Transform + X3D
+            # Extraer características
             transformed = transform({"video": clip_tensor.float()})["video"]
             with torch.no_grad():
                 feat = model_x3d(transformed.unsqueeze(0).to(device)).cpu().numpy()
             vector = torch.from_numpy(feat).to(device)
 
-            # Custom inference
+            # Inferencia
             with torch.no_grad():
                 score, _ = model_custom(vector)
                 score = torch.sigmoid(score).item()
 
             print(f"🔍 SCORE DE ANOMALÍA: {round(score, 4)}")
 
-            # Envío
-            payload = {"date": date, "camera_id": args.camera_id, "score": score}
+            # Enviar score
+            payload = {
+                "date": date,
+                "camera_id": args.camera_id,
+                "score": score,
+                "window_id": window_id,
+                "last_frame_index": fb.read_ptr  # o fb.read_ptr + offset
+                }
+            
+            window_id += 1
             threading.Thread(target=enviar_score, args=(payload, args.endpoint), daemon=True).start()
 
-            # ⏱ Esperar hasta que se cumpla el tiempo de ventana
-            elapsed = time.time() - T1
-            restante = intervalo_seg - elapsed
-            if restante > 0:
-                print(f"😴 Durmiendo {round(restante, 2)} s para sincronizar...")
-                time.sleep(restante)
-            else:
-                print(f"⚠️ Procesamiento tardó más de lo estimado: {round(elapsed,2)} s")
+
 
     except KeyboardInterrupt:
         print("✋ Interrupción detectada. Finalizando...")
@@ -108,5 +107,3 @@ def main(args):
 if __name__ == '__main__':
     args = parse_args()
     main(args)
-
-#python main.py --video 1 --x3d_version s --num_frames 13 --stride 6 --model_name STEAD_FAST_S_13_6final --arch fast --camera_id 1 --endpoint http://localhost:8080/anomaly
