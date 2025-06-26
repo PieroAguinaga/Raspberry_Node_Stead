@@ -108,3 +108,5 @@ def main(args):
 if __name__ == '__main__':
     args = parse_args()
     main(args)
+
+#python main.py --video 1 --x3d_version s --num_frames 13 --stride 6 --model_name STEAD_FAST_S_13_6final --arch fast --camera_id 1 --endpoint http://localhost:8080/anomaly
