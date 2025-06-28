@@ -31,7 +31,7 @@ def parse_args():
     parser.add_argument('--visualize', action='store_true', help='Mostrar visualizacin en tiempo real durante inferencia')
     parser.add_argument('--model_name_suffix', type=str, required=False, help='Nombre del modelo personalizado (ej: 888tiny)')
 
-
+    #python main.py --video 1 --model_name STEAD_FAST_XS_4_12final  --x3d_version xs --num_frames 4 --stride 12 --arch fast --camera_id 1 --endpoint http://localhost:8080/anomaly
     parser.add_argument('--video', type=int, required=False, help='ID del video de demo (ej: 1 = video_1.mp4)')
     parser.add_argument('--x3d_version', type=str, default='x3d_xs', help='Versión del modelo X3D (ej. x3d_xs, x3d_m)')
     parser.add_argument('--num_frames', type=int, default=16, help='Cantidad de frames por clip')

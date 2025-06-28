@@ -11,6 +11,7 @@ from buffer import FrameBuffer  # Usa la nueva versión con read_next_window
 from option import parse_args
 import cv2
 import threading
+import os
 
 def enviar_score(payload, endpoint):
     try:
@@ -33,7 +34,7 @@ def main(args):
     buffer_size = args.num_frames * args.stride * 4
     fb = FrameBuffer(ip_cam, maxlen=buffer_size).start()
     print(f"✅ FrameBuffer iniciado con tamaño máximo = {buffer_size}")
-    time.sleep(5)
+    
 
     # Cargar modelos
     device = torch.device("cpu")
@@ -48,7 +49,6 @@ def main(args):
     try:
         while True:
             T1 = time.time()
-            date = datetime.now().isoformat()
 
 
             print("\n📸 Leyendo ventana siguiente del buffer (sliding window)...")
@@ -59,8 +59,13 @@ def main(args):
                 print(f"⏳ Esperando frames: {e}")
                 time.sleep(0.1)
                 continue
-
+            date = datetime.now().isoformat()
             print(f"🟢 {len(raw_frames)} frames obtenidos.")
+            os.makedirs("debug_frames", exist_ok=True)
+            
+            #for idx, fr in enumerate(raw_frames):
+            #    cv2.imwrite(f"debug_frames/window{window_id}_frame{idx}.jpg", fr)
+            #    print(f"🖼️ Guardado frame {idx} de ventana {window_id}")
 
             # Preprocesar
             proc = []
@@ -70,6 +75,8 @@ def main(args):
                 t = torch.from_numpy(fr).permute(2, 0, 1).float() / 255.0
                 proc.append(t)
             clip_tensor = torch.stack(proc)
+
+
 
             # Extraer características
             transformed = transform({"video": clip_tensor.float()})["video"]
@@ -82,7 +89,9 @@ def main(args):
                 score, _ = model_custom(vector)
                 score = torch.sigmoid(score).item()
 
+            print(window_id)
             print(f"🔍 SCORE DE ANOMALÍA: {round(score, 4)}")
+
 
             # Enviar score
             payload = {
@@ -90,8 +99,16 @@ def main(args):
                 "camera_id": args.camera_id,
                 "score": score,
                 "window_id": window_id,
-                "last_frame_index": fb.read_ptr  # o fb.read_ptr + offset
-                }
+                "start_frame_index": fb.read_ptr - args.num_frames * args.stride,
+                "last_frame_index": fb.read_ptr,
+                "fps": fps,
+                "window_size_frames": args.num_frames,
+                "stride": args.stride,
+                "duration_sec": intervalo_seg,
+                "anomaly_detected": score > 0.5,  # umbral arbitrario
+                "window_resolution": f"{size[0]}x{size[1]}",
+                "source_video_id": args.video
+            }
             
             window_id += 1
             threading.Thread(target=enviar_score, args=(payload, args.endpoint), daemon=True).start()
@@ -107,3 +124,4 @@ def main(args):
 if __name__ == '__main__':
     args = parse_args()
     main(args)
+#python main.py --video 1 --model_name STEAD_FAST_XS_4_12final  --x3d_version xs --num_frames 4 --stride 12 --arch fast --camera_id 1 --endpoint http://localhost:8080/anomaly

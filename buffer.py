@@ -40,6 +40,7 @@ class FrameBuffer:
             available = self.frame_index - self.read_ptr
 
             if available < total_needed:
+                
                 raise RuntimeError("⚠️ No hay suficientes frames aún para la siguiente ventana.")
 
             # Calcular índice relativo al buffer actual

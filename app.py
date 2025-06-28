@@ -4,7 +4,7 @@ import threading
 import time
 import os
 
-VIDEO_ID = int(os.environ.get("VIDEO_ID", 1))  # Valor por defecto: 1
+VIDEO_ID = int(os.environ.get("VIDEO_ID", 2))  # Valor por defecto: 1
 import os
 app = Flask(__name__)
 
