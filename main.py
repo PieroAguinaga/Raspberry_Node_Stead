@@ -12,6 +12,7 @@ from option import parse_args
 import cv2
 import threading
 import os
+from datetime import datetime
 
 def enviar_score(payload, endpoint):
     try:
@@ -30,8 +31,8 @@ def main(args):
     ip_cam = "http://localhost:5000/loop"
     print(f"🌐 Dirección del stream: {ip_cam}")
 
-    # Inicializar FrameBuffer con nuevo modo sliding window
-    buffer_size = args.num_frames * args.stride * 4
+
+    buffer_size = args.num_frames * args.stride * 10
     fb = FrameBuffer(ip_cam, maxlen=buffer_size).start()
     print(f"✅ FrameBuffer iniciado con tamaño máximo = {buffer_size}")
     
@@ -63,18 +64,15 @@ def main(args):
             print(f"🟢 {len(raw_frames)} frames obtenidos.")
             os.makedirs("debug_frames", exist_ok=True)
             
-            #for idx, fr in enumerate(raw_frames):
-            #    cv2.imwrite(f"debug_frames/window{window_id}_frame{idx}.jpg", fr)
-            #    print(f"🖼️ Guardado frame {idx} de ventana {window_id}")
+            for idx, fr in enumerate(raw_frames):
+                cv2.imwrite(f"debug_frames/window{window_id}_frame{idx}.jpg", fr)
+                print(f"🖼️ Guardado frame {idx} de ventana {window_id}")
 
             # Preprocesar
-            proc = []
-            for fr in raw_frames:
-                fr = cv2.resize(fr, size)
-                fr = cv2.cvtColor(fr, cv2.COLOR_BGR2RGB)
-                t = torch.from_numpy(fr).permute(2, 0, 1).float() / 255.0
-                proc.append(t)
-            clip_tensor = torch.stack(proc)
+            clip_tensor = torch.stack([
+                torch.from_numpy(cv2.cvtColor(fr, cv2.COLOR_BGR2RGB)).permute(2, 0, 1).float()
+                 for fr in raw_frames
+                    ])
 
 
 
@@ -92,10 +90,16 @@ def main(args):
             print(window_id)
             print(f"🔍 SCORE DE ANOMALÍA: {round(score, 4)}")
 
+           
 
-            # Enviar score
+            start_frame_index = fb.read_ptr - args.num_frames * args.stride
+            # Tiempo en segundos desde que inició el buffer
+            offset_seconds = start_frame_index / fps
+            # Convertimos a ISO usando el tiempo de inicio del buffer
+            start_time_iso = datetime.fromtimestamp(fb.start_time + offset_seconds).isoformat()
+                        # Enviar score
             payload = {
-                "date": date,
+                "date": start_time_iso,
                 "camera_id": args.camera_id,
                 "score": score,
                 "window_id": window_id,
@@ -105,7 +109,7 @@ def main(args):
                 "window_size_frames": args.num_frames,
                 "stride": args.stride,
                 "duration_sec": intervalo_seg,
-                "anomaly_detected": score > 0.5,  # umbral arbitrario
+                "anomaly_detected": score > 0.5,  
                 "window_resolution": f"{size[0]}x{size[1]}",
                 "source_video_id": args.video
             }

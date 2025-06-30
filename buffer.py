@@ -15,8 +15,10 @@ class FrameBuffer:
         self.frame_index = 0  # Índice total de frames leídos
         self.stopped = False
         self.thread = threading.Thread(target=self._reader, daemon=True)
+        self.start_time = None  # ⏱️ Tiempo de inicio en UNIX
 
     def start(self):
+        self.start_time = time.time()  # Marca el tiempo de inicio de la captura
         self.thread.start()
         return self
 
@@ -40,29 +42,31 @@ class FrameBuffer:
             available = self.frame_index - self.read_ptr
 
             if available < total_needed:
-                
                 raise RuntimeError("⚠️ No hay suficientes frames aún para la siguiente ventana.")
 
-            # Calcular índice relativo al buffer actual
-            offset = self.frame_index - len(self.buffer)  # Cuántos frames han salido del buffer
+            offset = self.frame_index - len(self.buffer)
             buffer_start = self.read_ptr - offset
 
-            # Verificar si el puntero apunta fuera del rango actual del buffer
             if buffer_start < 0:
                 print("⚠️ read_ptr está apuntando a frames que ya no están en el buffer. Reiniciando puntero...")
-                self.read_ptr = self.frame_index - len(self.buffer)  # resíncroniza con el inicio del buffer
+                self.read_ptr = self.frame_index - len(self.buffer)
                 buffer_start = 0
 
             if (buffer_start + (num_frames - 1) * stride) >= len(self.buffer):
                 raise RuntimeError("⚠️ Los frames requeridos aún no han sido llenados en el buffer.")
 
-            # Extraer la ventana segura
             frames = [self.buffer[buffer_start + i * stride] for i in range(num_frames)]
-
-            # Avanzar el puntero lógicamente (sin solapamiento)
             self.read_ptr += num_frames * stride
 
         return frames
+
+    def get_timestamp_for_frame(self, frame_index, fps=30):
+        if self.start_time is None:
+            raise RuntimeError("⚠️ El buffer no ha sido iniciado con start().")
+        return self.start_time + (frame_index / fps)
+
+    def get_last_timestamp(self, fps=30):
+        return self.get_timestamp_for_frame(self.read_ptr, fps)
 
     def stop(self):
         self.stopped = True
