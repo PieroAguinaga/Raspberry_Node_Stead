@@ -128,4 +128,4 @@ def main(args):
 if __name__ == '__main__':
     args = parse_args()
     main(args)
-#python main.py --video 1 --model_name STEAD_FAST_XS_4_12final  --x3d_version xs --num_frames 4 --stride 12 --arch fast --camera_id 1 --endpoint http://localhost:8080/anomaly
+#python main.py --video 1 --model_name STEAD_BASE_XS_8_5final  --x3d_version xs --num_frames 8 --stride 5 --arch base --camera_id 1 --endpoint http://192.168.1.24:8080/anomaly
