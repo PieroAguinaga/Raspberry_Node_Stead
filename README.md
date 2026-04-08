@@ -210,6 +210,18 @@ Each detection window produces a JSON payload sent to the configured endpoint:
 
 ---
 
+## Based On
+
+This project uses a modified version of the model introduced in:
+
+> **STEAD: Spatio-Temporal Efficient Anomaly Detection for Time and Compute Sensitive Applications**
+> Andrew Gao, Jun Liu — 2025
+> [https://arxiv.org/abs/2503.07942](https://arxiv.org/abs/2503.07942)
+
+The original STEAD architecture achieves 91.34% AUC on the UCF-Crime benchmark using (2+1)D convolutions and Performer linear attention. This repository adapts and extends that model for real-time edge deployment on surveillance camera streams.
+
+---
+
 ## License
 
 MIT
